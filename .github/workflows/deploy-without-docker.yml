@@ -26,6 +26,7 @@ jobs:
 
       - name: Deploy code & restart service
         run: |
+          mkdir -p ~/.ssh
           echo "${{ secrets.EC2_SSH_KEY }}" > key && chmod 600 key
           ssh-keyscan -p "${EC2_PORT:-22}" -H "$EC2_HOST" >> ~/.ssh/known_hosts 2>/dev/null
 
