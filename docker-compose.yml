@@ -1,0 +1,29 @@
+# Two-tier stack: Flask app tier (web) + PostgreSQL data tier (db)
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: profile
+      POSTGRES_PASSWORD: profile
+      POSTGRES_DB: profiledb
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U profile"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  web:
+    build: .
+    ports:
+      - "5000:5000"
+    environment:
+      DATABASE_URL: postgresql://profile:profile@db:5432/profiledb
+      SECRET_KEY: change-me-in-prod
+    depends_on:
+      db:
+        condition: service_healthy
+
+volumes:
+  pgdata:

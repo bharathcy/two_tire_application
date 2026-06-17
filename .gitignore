@@ -1,0 +1,19 @@
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+*.db
+instance/
+
+# Secrets / keys
+.env
+*.pem
+*.key
+id_rsa*
+deploy_key
+
+# OS / editor
+.DS_Store
+.idea/
+.vscode/

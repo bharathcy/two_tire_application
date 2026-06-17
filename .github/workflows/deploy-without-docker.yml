@@ -1,0 +1,44 @@
+name: Deploy to AWS EC2 (without Docker)
+
+# Deploys the Flask app to an EC2 instance:
+#   - rsyncs the code to APP_DIR
+#   - installs requirements into the app's virtualenv
+#   - restarts the gunicorn systemd service
+# Nginx (reverse proxy) + SSL + PostgreSQL + the systemd unit and venv are
+# assumed to be set up on the instance by your server-side scripts.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+env:
+  EC2_HOST: ${{ secrets.EC2_HOST }}
+  EC2_USER: ${{ secrets.EC2_USER }}
+  EC2_PORT: ${{ secrets.EC2_PORT }}
+  APP_DIR: ${{ secrets.APP_DIR }}
+  SERVICE: ${{ secrets.SERVICE_NAME }}
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Deploy code & restart service
+        run: |
+          echo "${{ secrets.EC2_SSH_KEY }}" > key && chmod 600 key
+          ssh-keyscan -p "${EC2_PORT:-22}" -H "$EC2_HOST" >> ~/.ssh/known_hosts 2>/dev/null
+
+          # Sync application code (exclude dev-only files)
+          rsync -az --delete -e "ssh -i key -p ${EC2_PORT:-22}" \
+            --exclude='.git' --exclude='.github' --exclude='tests' \
+            --exclude='__pycache__' --exclude='*.md' \
+            app wsgi.py requirements.txt \
+            "${EC2_USER}@${EC2_HOST}:${APP_DIR}/"
+
+          # Install deps in the venv and restart gunicorn
+          ssh -i key -p "${EC2_PORT:-22}" "${EC2_USER}@${EC2_HOST}" "
+            cd '${APP_DIR}' &&
+            ./venv/bin/pip install -r requirements.txt -q &&
+            sudo systemctl restart '${SERVICE}'
+          "

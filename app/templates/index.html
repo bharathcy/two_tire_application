@@ -1,0 +1,90 @@
+{% extends "base.html" %}
+
+{% block content %}
+<header class="profile-hero text-white">
+  <div class="hero-overlay"></div>
+  <div class="container position-relative">
+    <div class="row align-items-center gy-4 py-5">
+      <div class="col-lg-3 text-center text-lg-start">
+        <img
+          src="https://api.dicebear.com/9.x/initials/svg?seed={{ p.name | urlencode }}&backgroundColor=0d6efd,6610f2&fontWeight=600"
+          alt="{{ p.name }}"
+          class="avatar shadow-lg"
+        />
+      </div>
+      <div class="col-lg-9 text-center text-lg-start">
+        <span class="badge rounded-pill status-badge mb-3">
+          <span class="status-dot"></span> Available for new opportunities
+        </span>
+        <h1 class="display-5 fw-bold mb-1">{{ p.name }}</h1>
+        <p class="lead mb-3 text-white-50">{{ p.title }}</p>
+        <p class="hero-summary mb-4">{{ p.summary }}</p>
+        <div class="d-flex flex-wrap gap-2 justify-content-center justify-content-lg-start">
+          <a href="{{ url_for('main.edit') }}" class="btn btn-light btn-lg px-4 fw-semibold">
+            <i class="bi bi-pencil-square me-2"></i>Edit Profile
+          </a>
+          {% if p.email %}
+          <a href="mailto:{{ p.email }}" class="btn btn-outline-light btn-lg px-4">
+            <i class="bi bi-envelope me-2"></i>Contact
+          </a>
+          {% endif %}
+        </div>
+        <div class="d-flex gap-3 mt-4 justify-content-center justify-content-lg-start social">
+          {% if p.github %}<a href="{{ p.github }}" aria-label="GitHub"><i class="bi bi-github"></i></a>{% endif %}
+          {% if p.linkedin %}<a href="{{ p.linkedin }}" aria-label="LinkedIn"><i class="bi bi-linkedin"></i></a>{% endif %}
+          {% if p.email %}<a href="mailto:{{ p.email }}" aria-label="Email"><i class="bi bi-envelope"></i></a>{% endif %}
+        </div>
+      </div>
+    </div>
+  </div>
+</header>
+
+<main class="container py-5">
+  <section class="row text-center g-4 mb-5 stats">
+    <div class="col-6 col-md-3">
+      <div class="stat-card h-100 p-4 rounded-4 shadow-sm">
+        <div class="stat-num">{{ p.years_experience }}</div>
+        <div class="stat-label">Years Experience</div>
+      </div>
+    </div>
+    <div class="col-6 col-md-3">
+      <div class="stat-card h-100 p-4 rounded-4 shadow-sm">
+        <div class="stat-num">{{ p.pipelines }}</div>
+        <div class="stat-label">Pipelines Built</div>
+      </div>
+    </div>
+    <div class="col-6 col-md-3">
+      <div class="stat-card h-100 p-4 rounded-4 shadow-sm">
+        <div class="stat-num">{{ p.uptime }}</div>
+        <div class="stat-label">Uptime Delivered</div>
+      </div>
+    </div>
+    <div class="col-6 col-md-3">
+      <div class="stat-card h-100 p-4 rounded-4 shadow-sm">
+        <div class="stat-num">{{ p.clusters }}</div>
+        <div class="stat-label">Clusters Managed</div>
+      </div>
+    </div>
+  </section>
+
+  <div class="row g-4">
+    <div class="col-lg-8">
+      <section class="content-card p-4 p-md-5 rounded-4 shadow-sm mb-4">
+        <h2 class="section-title"><i class="bi bi-person-badge me-2"></i>About Me</h2>
+        <p class="text-secondary mb-0">{{ p.about }}</p>
+      </section>
+    </div>
+
+    <div class="col-lg-4">
+      <section class="content-card p-4 rounded-4 shadow-sm">
+        <h2 class="section-title fs-5"><i class="bi bi-info-circle me-2"></i>Details</h2>
+        <ul class="list-unstyled info-list mb-0">
+          {% if p.location %}<li><i class="bi bi-geo-alt"></i><span>{{ p.location }}</span></li>{% endif %}
+          {% if p.email %}<li><i class="bi bi-envelope"></i><span>{{ p.email }}</span></li>{% endif %}
+          {% if p.github %}<li><i class="bi bi-github"></i><span>{{ p.github }}</span></li>{% endif %}
+        </ul>
+      </section>
+    </div>
+  </div>
+</main>
+{% endblock %}
