@@ -76,6 +76,9 @@ Pytest ─▶ SonarQube + Gate ─▶ OWASP ZAP ─▶ docker build ─▶ Trivy
   individual alerts in [.zap/rules.tsv](.zap/rules.tsv).
 - The image is built, **scanned by Trivy** (HIGH/CRITICAL), and **only pushed if
   the scan passes** — a vulnerable image never reaches Docker Hub.
+- **Simulation mode**: if the Docker Hub secrets aren't configured, the login
+  and push are skipped and the push is *simulated* (logged only), so the whole
+  pipeline can be tested end-to-end without publishing anything.
 - On **pull requests** only the gates run (no build/publish).
 
 ## ☁️ EC2 deploy (`deploy-without-docker.yml`)
