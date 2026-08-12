@@ -36,7 +36,7 @@ jobs:
         uses: SonarSource/sonarqube-scan-action@v4
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
-          SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}
+          SONAR_HOST_URL: https://sonarcloud.io
       - name: Quality Gate check
         uses: SonarSource/sonarqube-quality-gate-action@v1
         timeout-minutes: 5
