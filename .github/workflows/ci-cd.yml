@@ -1,4 +1,20 @@
-name: CI/CD — Test, Scan, Build & Publish
+name: CI/CD — DevSecOps Pipeline
+
+# Sequential DevSecOps chain. Every stage is a gate: a failure stops the
+# pipeline. Stages marked (simulated) explain what would happen in a real
+# environment when no infrastructure/credentials are wired up.
+#
+#   1. Secrets Scan (Gitleaks)        — leaked credentials in code/history
+#   2. Pytest                         — correctness
+#   3. SCA (pip-audit)                — known CVEs in dependencies
+#   4. SAST (Bandit + SonarQube)      — insecure code patterns + quality gate
+#   5. IaC Scan (Trivy config)        — Dockerfile/infra misconfigurations
+#   6. DAST (OWASP ZAP)               — attack the RUNNING app over HTTP
+#   7. Build → Trivy → SBOM → Push    — image CVE scan, SBOM, sign+push (sim)
+#   8. Deploy Staging (simulated)
+#   9. Smoke Test (simulated)
+#  10. Deploy Production (simulated)
+#  11. Monitoring & Runtime Security (simulated)
 
 on:
   push:
@@ -12,9 +28,27 @@ env:
   IMAGE: ${{ secrets.DOCKERHUB_USERNAME || 'local' }}/two-tire-profile
 
 jobs:
-  # 1) Unit tests — the primary correctness gate
+  # ──────────────────────────────────────────────────────────────────────────
+  # 1) SECRETS SCANNING — the cheapest, earliest gate. A credential committed
+  #    to git history stays exploitable forever, even after deletion.
+  secrets-scan:
+    name: Secrets Scan (Gitleaks)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0   # full history — leaks hide in old commits
+      - name: Gitleaks — scan working tree and full git history
+        run: |
+          docker run --rm -v "$PWD:/repo" ghcr.io/gitleaks/gitleaks:latest \
+            detect --source /repo --config /repo/.gitleaks.toml \
+            --no-banner --redact -v
+
+  # ──────────────────────────────────────────────────────────────────────────
+  # 2) UNIT TESTS — the primary correctness gate
   test:
     name: Pytest
+    needs: secrets-scan
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
@@ -24,15 +58,40 @@ jobs:
       - run: pip install -r requirements-dev.txt
       - run: pytest -q
 
-  # 2) Static analysis (SAST) — only after tests pass
-  code-quality:
-    name: SonarQube + Quality Gate
+  # ──────────────────────────────────────────────────────────────────────────
+  # 3) SCA (Software Composition Analysis) — most breaches enter through a
+  #    vulnerable *dependency*, not your own code (e.g. Log4Shell).
+  sca:
+    name: SCA — Dependency Audit (pip-audit)
     needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - run: pip install pip-audit
+      - name: Audit dependencies against known-CVE databases (PyPI/OSV)
+        run: pip-audit -r requirements.txt
+
+  # ──────────────────────────────────────────────────────────────────────────
+  # 4) SAST — analyze source code without running it. Bandit knows Python
+  #    security anti-patterns; SonarQube adds bugs/smells + the quality gate.
+  sast:
+    name: SAST — Bandit + SonarQube Gate
+    needs: sca
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
         with:
           fetch-depth: 0
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - name: Bandit — Python security linter (fails on MEDIUM+)
+        run: |
+          pip install bandit
+          bandit -r app wsgi.py -ll
       - name: SonarQube scan
         uses: SonarSource/sonarqube-scan-action@v4
         env:
@@ -44,10 +103,29 @@ jobs:
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
 
-  # 3) DAST — boot the real two-tier stack and attack it over HTTP; after SAST
+  # ──────────────────────────────────────────────────────────────────────────
+  # 5) IaC SCANNING — misconfigured infrastructure (root containers, exposed
+  #    ports, missing limits) is as exploitable as vulnerable code.
+  iac-scan:
+    name: IaC Scan (Trivy config)
+    needs: sast
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: Scan Dockerfile & configs for misconfigurations
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          scan-type: config
+          scan-ref: .
+          severity: HIGH,CRITICAL
+          exit-code: "1"
+
+  # ──────────────────────────────────────────────────────────────────────────
+  # 6) DAST — boot the real two-tier stack and attack it over HTTP, like an
+  #    outside attacker with no source access would.
   dast:
     name: OWASP ZAP Baseline (DAST)
-    needs: code-quality
+    needs: iac-scan
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
@@ -76,10 +154,12 @@ jobs:
           # Flip to true to make DAST a hard gate that fails the pipeline.
           fail_action: false
 
-  # 4) Build → Trivy → push. Last in the chain (test → SAST → DAST → here);
-  #    skipped on pull_request.
+  # ──────────────────────────────────────────────────────────────────────────
+  # 7) BUILD → IMAGE SCAN → SBOM → SIGN/PUSH. The exact artifact that ships is
+  #    scanned; the SBOM records what's inside it (supply-chain transparency).
+  #    Signing and pushing are simulated until registry credentials exist.
   build-scan-push:
-    name: Build → Trivy → Push
+    name: Build → Trivy → SBOM → Push
     needs: dast
     if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
@@ -106,13 +186,38 @@ jobs:
             ${{ env.IMAGE }}:latest
             ${{ env.IMAGE }}:${{ github.sha }}
 
-      - name: Scan image with Trivy
+      - name: Scan image with Trivy (HIGH/CRITICAL CVEs block the pipeline)
         uses: aquasecurity/trivy-action@v0.36.0
         with:
           image-ref: ${{ env.IMAGE }}:${{ github.sha }}
           severity: HIGH,CRITICAL
           exit-code: "1"
           ignore-unfixed: true
+
+      - name: Generate SBOM (CycloneDX)
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          scan-type: image
+          image-ref: ${{ env.IMAGE }}:${{ github.sha }}
+          format: cyclonedx
+          output: sbom.cdx.json
+
+      - name: Upload SBOM artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: sbom
+          path: sbom.cdx.json
+
+      - name: Simulate image signing (Cosign)
+        run: |
+          echo "SIMULATION: no signing key configured. In production:"
+          echo "  cosign sign --yes ${IMAGE}:${GITHUB_SHA}"
+          cat >> "$GITHUB_STEP_SUMMARY" <<'EOF'
+          ## 🔏 Image signing (SIMULATED)
+          A real pipeline signs the image with **Cosign** (Sigstore) so the
+          deploy target can verify the artifact came from this pipeline and was
+          not tampered with in the registry — supply-chain integrity.
+          EOF
 
       - name: Push image (only reached if Trivy passed)
         if: env.PUSH_ENABLED == 'true'
@@ -125,6 +230,122 @@ jobs:
         run: |
           echo "::notice::SIMULATION — Docker Hub secrets not set; skipping real push."
           echo "Image built and Trivy-scanned successfully. Would have pushed:"
-          echo "  docker push ${{ env.IMAGE }}:latest"
-          echo "  docker push ${{ env.IMAGE }}:${{ github.sha }}"
-          docker image ls "${{ env.IMAGE }}"
+          echo "  docker push ${IMAGE}:latest"
+          echo "  docker push ${IMAGE}:${GITHUB_SHA}"
+          docker image ls "${IMAGE}"
+
+  # ──────────────────────────────────────────────────────────────────────────
+  # 8) STAGING DEPLOY (SIMULATED) — deploy the *scanned, signed* artifact to a
+  #    production-like environment first.
+  deploy-staging:
+    name: Deploy Staging (simulated)
+    needs: build-scan-push
+    runs-on: ubuntu-latest
+    steps:
+      - name: Simulate staging deployment
+        run: |
+          echo "SIMULATION: deploying ${IMAGE}:${GITHUB_SHA} to STAGING (blue/green)..."
+          sleep 2
+          echo "SIMULATION: staging deploy complete."
+          {
+            echo "## 🚀 Staging deployment (SIMULATED)"
+            echo ""
+            echo "Deployed image: \`${IMAGE}:${GITHUB_SHA}\`"
+            cat <<'EOF'
+
+          What a real stage does:
+          1. **Verify the image signature** (cosign verify) before pulling.
+          2. **Blue/green rollout** to staging (EC2/ECS/K8s) — zero downtime, instant rollback.
+          3. **Inject runtime secrets** (DATABASE_URL, SECRET_KEY) from a secrets manager — never baked into the image.
+
+          **Security purpose:** test the *exact* artifact that was scanned & signed, in an isolated production-like environment.
+          EOF
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  # ──────────────────────────────────────────────────────────────────────────
+  # 9) SMOKE TEST (SIMULATED) — verify the deployment actually works before
+  #    promoting it any further.
+  smoke-test:
+    name: Smoke Test (simulated)
+    needs: deploy-staging
+    runs-on: ubuntu-latest
+    steps:
+      - name: Simulate post-deploy smoke tests
+        run: |
+          echo "SIMULATION: GET https://staging.example.com/health  -> 200 {\"status\":\"ok\"}"
+          echo "SIMULATION: GET https://staging.example.com/        -> 200 (profile page renders)"
+          echo "SIMULATION: TLS certificate valid, HSTS present, security headers OK"
+          {
+            echo "## 🧪 Smoke test @ staging (SIMULATED)"
+            cat <<'EOF'
+
+          A real stage curls the staging URL and asserts:
+          - `/health` returns 200 — app is alive and DB is reachable
+          - key pages render (no 5xx)
+          - TLS certificate is valid and **security headers** (HSTS, CSP, X-Content-Type-Options) are present
+
+          **Security purpose:** catches broken deploys and missing TLS/header hardening before production promotion.
+          EOF
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  # ──────────────────────────────────────────────────────────────────────────
+  # 10) PRODUCTION DEPLOY (SIMULATED) — promotion of the same artifact, behind
+  #     an approval gate.
+  deploy-production:
+    name: Deploy Production (simulated)
+    needs: smoke-test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Simulate production deployment
+        run: |
+          echo "SIMULATION: manual approval satisfied (GitHub Environment protection rule)"
+          echo "SIMULATION: promoting ${IMAGE}:${GITHUB_SHA} from staging to PRODUCTION..."
+          sleep 2
+          echo "SIMULATION: production rollout complete, previous version kept for rollback."
+          {
+            echo "## 🏭 Production deployment (SIMULATED)"
+            echo ""
+            echo "Promoted image: \`${IMAGE}:${GITHUB_SHA}\`"
+            cat <<'EOF'
+
+          What a real stage does:
+          1. **Manual approval gate** — a GitHub *Environment* named `production` with required reviewers; nobody ships alone.
+          2. **Promote the same digest** that passed staging — never rebuild for prod (build-once, promote-many).
+          3. **Progressive rollout** (canary %) with automatic rollback on error-rate spikes.
+
+          **Security purpose:** least privilege + four-eyes principle — CI has no standing prod credentials; approval and audit trail are enforced by the platform.
+          EOF
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  # ──────────────────────────────────────────────────────────────────────────
+  # 11) MONITORING & RUNTIME SECURITY (SIMULATED) — security doesn't stop at
+  #     deploy; production must be watched continuously.
+  monitoring:
+    name: Monitoring & Runtime Security (simulated)
+    needs: deploy-production
+    runs-on: ubuntu-latest
+    steps:
+      - name: Simulate monitoring & runtime security setup
+        run: |
+          echo "SIMULATION: Prometheus scraping /health + gunicorn metrics"
+          echo "SIMULATION: Grafana dashboard 'two-tire-profile' updated"
+          echo "SIMULATION: alert rules loaded (5xx rate, p95 latency, cert expiry)"
+          echo "SIMULATION: WAF + fail2ban active, Falco watching container syscalls"
+          {
+            echo "## 📈 Monitoring & runtime security (SIMULATED)"
+            cat <<'EOF'
+
+          What runs continuously in a real setup:
+
+          | Layer | Tool (example) | What it catches |
+          |---|---|---|
+          | Metrics & alerting | Prometheus + Grafana | 5xx spikes, latency, saturation |
+          | Uptime / synthetic | Blackbox exporter | site down, TLS cert expiring |
+          | Centralized logs | Loki / CloudWatch | error patterns, audit trail |
+          | WAF & rate limiting | Nginx + ModSecurity / fail2ban | SQLi/XSS attempts, brute force |
+          | Runtime detection | Falco | unexpected syscalls, container escape |
+          | Continuous SCA | Dependabot / scheduled Trivy | *new* CVEs in already-deployed images |
+
+          **Security purpose:** detection & response. Scans prove the app was clean at ship time — monitoring catches what happens *after*, including CVEs published tomorrow in the image you deployed today.
+          EOF
+          } >> "$GITHUB_STEP_SUMMARY"

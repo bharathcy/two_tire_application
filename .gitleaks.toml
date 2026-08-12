@@ -1,0 +1,13 @@
+# Gitleaks configuration — secrets scanning rules.
+# Keeps all default detection rules and allowlists documentation files that
+# contain *example* token formats (never real credentials).
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Docs with placeholder/example token formats only"
+paths = [
+  '''SECRETS\.md''',
+  '''README\.md''',
+]

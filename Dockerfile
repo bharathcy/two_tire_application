@@ -14,6 +14,11 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY app/ ./app/
 COPY wsgi.py .
 
+# Run as a dedicated non-root user (container hardening)
+RUN useradd --system --create-home --uid 10001 appuser \
+    && chown -R appuser:appuser /app
+USER appuser
+
 EXPOSE 5000
 
 # Run with gunicorn (production WSGI server)
