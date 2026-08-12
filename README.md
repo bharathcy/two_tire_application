@@ -5,8 +5,9 @@ A profile page with **view / edit / update**, built as a **two-tier app**:
 - **App tier** — Flask (served by gunicorn), Bootstrap 5 UI
 - **Data tier** — PostgreSQL (SQLite fallback for local dev)
 
-Full DevOps setup: unit tests, SonarQube quality gate, Docker, Trivy image
-scanning, Docker Hub publish, and an EC2 deploy — all via GitHub Actions.
+Full DevOps setup: unit tests, SonarQube quality gate (SAST), OWASP ZAP
+baseline scan (DAST), Docker, Trivy image scanning, Docker Hub publish, and an
+EC2 deploy — all via GitHub Actions.
 
 ## 📁 Project structure
 
@@ -25,9 +26,10 @@ two_tire_application/
 ├── Dockerfile                 # python:3.12-slim + gunicorn
 ├── docker-compose.yml         # web + db (the two tiers)
 ├── sonar-project.properties   # SonarQube config
+├── .zap/rules.tsv             # OWASP ZAP (DAST) alert tuning
 ├── README.md / SECRETS.md
 └── .github/workflows/
-    ├── ci-cd.yml                # test ∥ Sonar gate → build → Trivy → push
+    ├── ci-cd.yml                # test ∥ Sonar ∥ ZAP DAST → build → Trivy → push
     └── deploy-without-docker.yml # rsync code → venv install → restart gunicorn
 ```
 
@@ -60,13 +62,19 @@ pytest -q                # run the tests
 ## 🔁 CI/CD pipeline (`ci-cd.yml`)
 
 ```
-┌── Pytest ─────────────┐
-│                        ├─▶ docker build ─▶ Trivy scan ─▶ docker push
-└── SonarQube + Gate ───┘     (local load)    (blocks CVE)   (Docker Hub)
+┌── Pytest ──────────────────┐
+├── SonarQube + Gate (SAST) ─┼─▶ docker build ─▶ Trivy scan ─▶ docker push
+└── OWASP ZAP (DAST) ────────┘     (local load)    (blocks CVE)   (Docker Hub)
    (run in parallel)
 ```
 
-- **Tests and SonarQube run in parallel** and both must pass.
+- **Tests, SonarQube, and ZAP run in parallel** and all must pass.
+- **DAST**: the ZAP job boots the real two-tier stack with `docker compose`,
+  waits on `/health`, then runs the **ZAP baseline scan** (spider + passive
+  rules) against `http://localhost:5000`. The report is uploaded as the
+  `zap-baseline-report` artifact. It is **report-only** for now — set
+  `fail_action: true` in `ci-cd.yml` to make it a hard gate, and tune
+  individual alerts in [.zap/rules.tsv](.zap/rules.tsv).
 - The image is built, **scanned by Trivy** (HIGH/CRITICAL), and **only pushed if
   the scan passes** — a vulnerable image never reaches Docker Hub.
 - On **pull requests** only the gates run (no build/publish).
@@ -84,4 +92,5 @@ See **[SECRETS.md](SECRETS.md)** for every GitHub secret the workflows need.
 ## 🧰 Tech stack
 
 Flask · Flask-SQLAlchemy · PostgreSQL · gunicorn · Bootstrap 5 · Docker ·
-Docker Compose · GitHub Actions · SonarQube · Trivy · Docker Hub · AWS EC2 · Nginx
+Docker Compose · GitHub Actions · SonarQube · OWASP ZAP · Trivy · Docker Hub ·
+AWS EC2 · Nginx

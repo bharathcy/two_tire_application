@@ -1,0 +1,7 @@
+# OWASP ZAP baseline rules — tune which alerts WARN, FAIL, or are IGNOREd.
+# Format (TAB-separated):  <rule-id>	<IGNORE|WARN|FAIL>	<optional note>
+# Rule IDs appear in the scan output / zap-baseline-report artifact.
+#
+# Examples (uncomment to activate):
+# 10049	IGNORE	(Storable and Cacheable Content — fine for a public page)
+# 10202	FAIL	(Absence of Anti-CSRF Tokens — treat as a hard failure)
