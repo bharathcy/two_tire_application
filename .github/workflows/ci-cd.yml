@@ -11,7 +11,7 @@ env:
   IMAGE: ${{ secrets.DOCKERHUB_USERNAME }}/two-tire-profile
 
 jobs:
-  # 1a) Unit tests — the primary correctness gate
+  # 1) Unit tests — the primary correctness gate
   test:
     name: Pytest
     runs-on: ubuntu-latest
@@ -23,9 +23,10 @@ jobs:
       - run: pip install -r requirements-dev.txt
       - run: pytest -q
 
-  # 1b) Static analysis — runs in parallel with tests
+  # 2) Static analysis (SAST) — only after tests pass
   code-quality:
     name: SonarQube + Quality Gate
+    needs: test
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
@@ -42,9 +43,10 @@ jobs:
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
 
-  # 1c) DAST — boot the real two-tier stack and attack it over HTTP
+  # 3) DAST — boot the real two-tier stack and attack it over HTTP; after SAST
   dast:
     name: OWASP ZAP Baseline (DAST)
+    needs: code-quality
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
@@ -73,10 +75,11 @@ jobs:
           # Flip to true to make DAST a hard gate that fails the pipeline.
           fail_action: false
 
-  # 2) Build → Trivy → push. Needs ALL THREE gates; skipped on pull_request.
+  # 4) Build → Trivy → push. Last in the chain (test → SAST → DAST → here);
+  #    skipped on pull_request.
   build-scan-push:
     name: Build → Trivy → Push
-    needs: [test, code-quality, dast]
+    needs: dast
     if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     steps:

@@ -62,13 +62,12 @@ pytest -q                # run the tests
 ## 🔁 CI/CD pipeline (`ci-cd.yml`)
 
 ```
-┌── Pytest ──────────────────┐
-├── SonarQube + Gate (SAST) ─┼─▶ docker build ─▶ Trivy scan ─▶ docker push
-└── OWASP ZAP (DAST) ────────┘     (local load)    (blocks CVE)   (Docker Hub)
-   (run in parallel)
+Pytest ─▶ SonarQube + Gate ─▶ OWASP ZAP ─▶ docker build ─▶ Trivy scan ─▶ docker push
+(tests)        (SAST)           (DAST)      (local load)    (blocks CVE)   (Docker Hub)
 ```
 
-- **Tests, SonarQube, and ZAP run in parallel** and all must pass.
+- **The gates run sequentially** — each stage starts only if the previous one
+  passed: tests → SAST → DAST → build/publish.
 - **DAST**: the ZAP job boots the real two-tier stack with `docker compose`,
   waits on `/health`, then runs the **ZAP baseline scan** (spider + passive
   rules) against `http://localhost:5000`. The report is uploaded as the
